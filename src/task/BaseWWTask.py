@@ -72,7 +72,7 @@ class BaseWWTask(BaseTask):
             return True, None
 
     def absorb_echo_text(self, ignore_config=False):
-        if (self.pick_echo_config.get('Use OCR') or self.ocr_lib == 'paddleocr' or ignore_config) and (
+        if (self.pick_echo_config.get('Use OCR') or ignore_config) and (
                 self.game_lang == 'zh_CN' or self.game_lang == 'en_US'):
             return re.compile(r'(吸收|Absorb)')
         else:
@@ -141,7 +141,10 @@ class BaseWWTask(BaseTask):
                 return None
         return f
 
-    def walk_to_yolo_echo(self, time_out=15, update_function=None):
+    def has_target(self):
+        return False
+
+    def walk_to_yolo_echo(self, time_out=8, update_function=None, echo_threshold=0.5):
         last_direction = None
         start = time.time()
         no_echo_start = 0
@@ -151,7 +154,10 @@ class BaseWWTask(BaseTask):
                 self.log_debug('pick echo success')
                 self._stop_last_direction(last_direction)
                 return True
-            echos = self.find_echos()
+            if self.has_target():
+                self.log_debug('pick echo has_target return fail')
+                return False
+            echos = self.find_echos(threshold=echo_threshold)
             if not echos:
                 if no_echo_start == 0:
                     no_echo_start = time.time()
@@ -200,6 +206,7 @@ class BaseWWTask(BaseTask):
         start = time.time()
         ended = False
         last_target = None
+        centered = False
         while time.time() - start < time_out:
             self.next_frame()
             if end_condition:
@@ -220,18 +227,29 @@ class BaseWWTask(BaseTask):
             else:
                 x, y = last_target.center()
                 y = max(0, y - self.height_of_screen(y_offset))
-                next_direction = self.get_direction(x, y, self.width, self.height, current_direction=last_direction)
-
+                x_abs = abs(x - self.width_of_screen(0.5))
+                threshold = 0.04 if not last_direction else 0.07
+                centered = centered or x_abs <= self.width_of_screen(threshold)
+                if not centered:
+                    if x > self.width_of_screen(0.5):
+                        next_direction = 'd'
+                    else:
+                        next_direction = 'a'
+                else:
+                    if y > self.height_of_screen(0.5):
+                        next_direction = 's'
+                    else:
+                        next_direction = 'w'
             if next_direction != last_direction:
                 if last_direction:
                     self.send_key_up(last_direction)
-                    self.sleep(0.02)
+                    self.sleep(0.01)
                 last_direction = next_direction
                 if next_direction:
                     self.send_key_down(next_direction)
         if last_direction:
             self.send_key_up(last_direction)
-            self.sleep(0.02)
+            self.sleep(0.01)
         if not end_condition:
             return last_direction is not None
         else:
@@ -249,7 +267,7 @@ class BaseWWTask(BaseTask):
         else:
             return 'w'
 
-    def get_direction(self, location_x, location_y, screen_width, screen_height, current_direction):
+    def get_direction(self, location_x, location_y, screen_width, screen_height, centered, current_direction):
         """
         Determines the direction ('w', 'a', 's', 'd') closest to the screen center.
         Args:
@@ -308,7 +326,7 @@ class BaseWWTask(BaseTask):
 
     def in_realm(self):
         illusive_realm_exit = self.find_one('illusive_realm_exit',
-                                            use_gray_scale=False, threshold=0.5)
+                                            use_gray_scale=False, threshold=0.65)
         return illusive_realm_exit is not None
 
     def walk_until_f(self, direction='w', time_out=0, raise_if_not_found=True, backward_time=0, target_text=None,
@@ -332,6 +350,7 @@ class BaseWWTask(BaseTask):
         boxes = self.wait_ocr(0.49, 0.01, 0.92, 0.10, log=True, raise_if_not_found=False,
                               match=[number_re, stamina_re])
         if len(boxes) == 0:
+            self.screenshot('stamina_error')
             return -1, -1
         current_box = find_boxes_by_name(boxes, stamina_re)[0]
         current = int(current_box.name.split('/')[0])
@@ -426,13 +445,16 @@ class BaseWWTask(BaseTask):
         return False
 
     def handle_claim_button(self):
-        if self.wait_feature('claim_cancel_button_hcenter_vcenter', raise_if_not_found=False, horizontal_variance=0.05,
-                             vertical_variance=0.1, time_out=1.5, threshold=0.8):
+        if self.wait_until(self.has_claim, raise_if_not_found=False, time_out=1.5):
             self.sleep(0.5)
             self.send_key('esc')
             self.sleep(0.5)
             logger.info(f"found a claim reward")
             return True
+
+    def has_claim(self):
+        return not self.in_team()[0] and self.find_one('claim_cancel_button_hcenter_vcenter', horizontal_variance=0.05,
+                             vertical_variance=0.1, threshold=0.8)
 
     def test_absorb(self):
         # self.set_image('tests/images/absorb.png')
@@ -492,9 +514,22 @@ class BaseWWTask(BaseTask):
                 self.log_debug('found a echo picked')
                 return True
 
-    def yolo_find_echo(self, use_color=False, turn=True, update_function=None):
+    def walk_to_treasure(self, retry=0, send_f = True, raise_if_not_found=True):
+        if retry > 4:
+            raise RuntimeError('walk_to_treasure too many retries!')
+        if self.find_treasure_icon():
+            self.walk_to_box(self.find_treasure_icon, end_condition=self.find_f_with_text)
+        if send_f:
+            self.walk_until_f(time_out=2, backward_time=0, raise_if_not_found=raise_if_not_found, cancel=False)
+        self.sleep(1)
+        if self.find_treasure_icon():
+            self.log_info('retry walk_to_treasure')
+            self.walk_to_treasure(retry=retry + 1)
+        else:
+            return True
+
+    def yolo_find_echo(self, use_color=False, turn=True, update_function=None, time_out=8, threshold=0.5):
         if self.debug:
-            # self.draw_boxes('echo', echos)
             self.screenshot('yolo_echo_start')
         max_echo_count = 0
         if self.pick_echo():
@@ -505,13 +540,13 @@ class BaseWWTask(BaseTask):
         for i in range(4):
             if turn:
                 self.center_camera()
-            echos = self.find_echos()
+            echos = self.find_echos(threshold=threshold)
             max_echo_count = max(max_echo_count, len(echos))
             self.log_debug(f'max_echo_count {max_echo_count}')
             if echos:
                 self.log_info(f'yolo found echo {echos}')
                 # return self.walk_to_box(self.find_echos, time_out=15, end_condition=self.pick_echo), max_echo_count > 1
-                return self.walk_to_yolo_echo(update_function=update_function), max_echo_count > 1
+                return self.walk_to_yolo_echo(update_function=update_function, time_out=time_out), max_echo_count > 1
             if use_color:
                 color_percent = self.calculate_color_percentage(echo_color, front_box)
                 self.log_debug(f'pick_echo color_percent:{color_percent}')

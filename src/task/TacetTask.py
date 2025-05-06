@@ -20,7 +20,7 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
         }
         self.row_per_page = 5
         self.total_number = 11
-        self.target_enemy_time_out = 6
+        self.target_enemy_time_out = 8
         default_config.update(self.default_config)
         self.config_description = {
             'What materials to brush': 'Counting from top to bottom(Forgery Challenge ETC.)',
@@ -104,18 +104,6 @@ class TacetTask(WWOneTimeTask, BaseCombatTask):
                 return self.not_enough_stamina(back=True)
             if materials_index != 3:#如果运行模式为非无音区
                 self.sleep(8)
-
-
-    def walk_to_treasure(self, retry=0):
-        if retry > 4:
-            raise RuntimeError('walk_to_treasure too many retries!')
-        if self.find_treasure_icon():
-            self.walk_to_box(self.find_treasure_icon, end_condition=self.find_f_with_text)
-        self.walk_until_f(time_out=2, backward_time=0, raise_if_not_found=True, cancel=False)
-        self.sleep(1)
-        if self.find_treasure_icon():
-            self.log_info('retry walk_to_treasure')
-            self.walk_to_treasure(retry=retry + 1)
 
     def not_enough_stamina(self, back=True):
         self.log_info(f"used all stamina", notify=True)

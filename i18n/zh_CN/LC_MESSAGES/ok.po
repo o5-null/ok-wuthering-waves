@@ -522,3 +522,15 @@ msgstr "需要在大地图界面并且标记一个钻石为起点!"
 
 msgid "Need be in the map screen and have a path of at least 3 stars!"
 msgstr "需要在大地图界面并且至少有3个星星标记为路径!"
+
+msgid "Click Start after Entering Dungeon or Teleporting to The Boss"
+msgstr "在进入BOSS战斗后点击开始"
+
+msgid "Farm 4C Echo in Dungeon/World"
+msgstr "刷4C(大世界/副本)"
+
+msgid "Combat Wait Time"
+msgstr "战斗开始前等待时间(秒)"
+
+msgid "Wait time before each combat(seconds), set 5 if farming Sentry Construct"
+msgstr "如果刷异构武装设置为5秒"
